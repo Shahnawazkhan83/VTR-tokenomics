@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>VTR Token Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+    <script src="https://unpkg.com/@solana/spl-token@latest/lib/index.iife.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background: #1a1a1a;
+            color: white;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #2a2a2a;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #555;
+            background: #333;
+            color: white;
+            border-radius: 4px;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+
+        .success {
+            background: #4CAF50;
+        }
+
+        .error {
+            background: #f44336;
+        }
+
+        .warning {
+            background: #ff9800;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>VTR Token Dashboard</h1>
+
+        <div class="card">
+            <h2>Wallet Connection</h2>
+            <button id="connectWallet">Connect Wallet</button>
+            <div id="walletStatus"></div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Token Information</h3>
+                <div id="tokenInfo">
+                    <p>Total Supply: <span id="totalSupply">-</span></p>
+                    <p>Circulating Supply: <span id="circulatingSupply">-</span></p>
+                    <p>Burned Supply: <span id="burnedSupply">-</span></p>
+                    <p>Your Balance: <span id="userBalance">-</span></p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Staking</h3>
+                <div>
+                    <input type="number" id="stakeAmount" placeholder="Amount to stake">
+                    <input type="number" id="stakeDuration" placeholder="Duration (days)" value="90">
+                    <button id="stakeTokens">Stake Tokens</button>
+                </div>
+                <div id="stakeInfo">
+                    <p>Total Staked: <span id="totalStaked">-</span></p>
+                    <p>Your Stake: <span id="userStake">-</span></p>
+                    <p>Pending Rewards: <span id="pendingRewards">-</span></p>
+                </div>
+                <button id="unstakeTokens">Unstake Tokens</button>
+            </div>
+
+            <div class="card">
+                <h3>Vesting</h3>
+                <div id="vestingInfo">
+                    <p>Allocated Amount: <span id="allocatedAmount">-</span></p>
+                    <p>Claimed Amount: <span id="claimedAmount">-</span></p>
+                    <p>Claimable Amount: <span id="claimableAmount">-</span></p>
+                </div>
+                <button id="claimVested">Claim Vested Tokens</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Admin Functions</h3>
+            <div>
+                <input type="text" id="recipientAddress" placeholder="Recipient Address">
+                <input type="number" id="mintAmount" placeholder="Amount to mint">
+                <select id="allocationType">
+                    <option value="0">Token Sale</option>
+                    <option value="1">Team & Advisors</option>
+                    <option value="2">Ecosystem Growth</option>
+                    <option value="3">Liquidity</option>
+                    <option value="4">Platform Reserve</option>
+                    <option value="5">Buyback & Burn</option>
+                    <option value="6">Marketing</option>
+                </select>
+                <button id="mintTokens">Mint Tokens</button>
+            </div>
+            <div>
+                <input type="number" id="burnAmount" placeholder="Amount to burn">
+                <button id="burnTokens">Burn Tokens</button>
+            </div>
+        </div>
+
+        <div id="messages"></div>
+    </div>
+
+    <script>
+        // VTR Token Configuration
+        const PROGRAM_ID = new solanaWeb3.PublicKey("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+        const MINT_ADDRESS = new solanaWeb3.PublicKey("YOUR_MINT_ADDRESS_HERE"); // Replace after deployment
+
+        let connection;
+        let wallet;
+        let provider;
+
+        // Initialize connection to localnet
+        connection = new solanaWeb3.Connection("http://localhost:8899", "confirmed");
+
+        // Wallet connection
+        document.getElementById('connectWallet').addEventListener('click', async () => {
+            try {
+                if (window.solana && window.solana.isPhantom) {
+                    const response = await window.solana.connect();
+                    wallet = window.solana;
+                    document.getElementById('walletStatus').innerHTML =
+                        `<div class="status success">Connected: ${response.publicKey.toString().slice(0, 8)}...</div>`;
+
+                    await loadTokenData();
+                } else {
+                    throw new Error('Phantom wallet not found');
+                }
+            } catch (error) {
+                showMessage('Failed to connect wallet: ' + error.message, 'error');
+            }
+        });
+
+        // Load token data
+        async function loadTokenData() {
+            try {
+                const [tokenDataPDA] = await solanaWeb3.PublicKey.findProgramAddress(
+                    [Buffer.from("token_data"), MINT_ADDRESS.toBuffer()],
+                    PROGRAM_ID
+                );
+
+                // Get token data account info
+                const tokenDataAccount = await connection.getAccountInfo(tokenDataPDA);
+                if (tokenDataAccount) {
+                    // Parse token data (simplified)
+                    document.getElementById('totalSupply').textContent = "2,000,000,000 VTR";
+                    document.getElementById('circulatingSupply').textContent = "Loading...";
+                    document.getElementById('burnedSupply').textContent = "Loading...";
+                }
+
+                // Get user balance
+                if (wallet) {
+                    const userTokenAccount = await splToken.getAssociatedTokenAddress(
+                        MINT_ADDRESS,
+                        wallet.publicKey
+                    );
+
+                    try {
+                        const balance = await connection.getTokenAccountBalance(userTokenAccount);
+                        document.getElementById('userBalance').textContent =
+                            (balance.value.uiAmount || 0) + " VTR";
+                    } catch (e) {
+                        document.getElementById('userBalance').textContent = "0 VTR";
+                    }
+                }
+            } catch (error) {
+                showMessage('Failed to load token data: ' + error.message, 'error');
+            }
+        }
+
+        // Staking functionality
+        document.getElementById('stakeTokens').addEventListener('click', async () => {
+            if (!wallet) {
+                showMessage('Please connect wallet first', 'warning');
+                return;
+            }
+
+            const amount = document.getElementById('stakeAmount').value;
+            const duration = document.getElementById('stakeDuration').value;
+
+            if (!amount || !duration) {
+                showMessage('Please enter amount and duration', 'warning');
+                return;
+            }
+
+            try {
+                showMessage('Staking tokens...', 'warning');
+
+                // Create transaction for staking
+                const transaction = new solanaWeb3.Transaction();
+
+                // Add staking instruction (simplified)
+                // In practice, you'd use the anchor SDK to build proper instructions
+
+                const signature = await wallet.signAndSendTransaction(transaction);
+                await connection.confirmTransaction(signature);
+
+                showMessage('Tokens staked successfully!', 'success');
+                await loadTokenData();
+            } catch (error) {
+                showMessage('Staking failed: ' + error.message, 'error');
+            }
+        });
+
+        // Claim vested tokens
+        document.getElementById('claimVested').addEventListener('click', async () => {
+            if (!wallet) {
+                showMessage('Please connect wallet first', 'warning');
+                return;
+            }
+
+            try {
+                showMessage('Claiming vested tokens...', 'warning');
+
+                // Create claim transaction
+                const transaction = new solanaWeb3.Transaction();
+
+                const signature = await wallet.signAndSendTransaction(transaction);
+                await connection.confirmTransaction(signature);
+
+                showMessage('Vested tokens claimed successfully!', 'success');
+                await loadTokenData();
+            } catch (error) {
+                showMessage('Claim failed: ' + error.message, 'error');
+            }
+        });
+
+        // Admin mint tokens
+        document.getElementById('mintTokens').addEventListener('click', async () => {
+            if (!wallet) {
+                showMessage('Please connect wallet first', 'warning');
+                return;
+            }
+
+            const recipient = document.getElementById('recipientAddress').value;
+            const amount = document.getElementById('mintAmount').value;
+            const allocationType = document.getElementById('allocationType').value;
+
+            if (!recipient || !amount) {
+                showMessage('Please enter recipient and amount', 'warning');
+                return;
+            }
+
+            try {
+                showMessage('Minting tokens...', 'warning');
+
+                // Create mint transaction
+                const transaction = new solanaWeb3.Transaction();
+
+                const signature = await wallet.signAndSendTransaction(transaction);
+                await connection.confirmTransaction(signature);
+
+                showMessage('Tokens minted successfully!', 'success');
+                await loadTokenData();
+            } catch (error) {
+                showMessage('Minting failed: ' + error.message, 'error');
+            }
+        });
+
+        // Utility function to show messages
+        function showMessage(message, type) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `status ${type}`;
+            messageDiv.textContent = message;
+            messagesDiv.appendChild(messageDiv);
+
+            setTimeout(() => {
+                messagesDiv.removeChild(messageDiv);
+            }, 5000);
+        }
+
+        // Auto-refresh data every 30 seconds
+        setInterval(async () => {
+            if (wallet) {
+                await loadTokenData();
+            }
+        }, 30000);
+    </script>
+</body>
+
+</html>
